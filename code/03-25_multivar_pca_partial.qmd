@@ -178,8 +178,8 @@ weather %>%
   mutate(r2 = map_dbl(data,
                   ~lm(strength_gtex ~ value,
                       data = .x) %>%
-                    glance(.) %>%
-                    pull(r.squared)
+                    glance(.) %>% # glance give fit metrics aic, bic, r2, adj rsq
+                    pull(r.squared) #just pulling r.sq from the fit metrics
                   )) %>%
   arrange(desc(r2))
 
@@ -214,7 +214,7 @@ weather %>%
   facet_wrap(~name, 
              scales = "free_x", 
              ncol=2) 
-
+## BE CAREFUL with colleration
 ```
 
 # Multicollinearity 
@@ -237,8 +237,8 @@ weather %>%
   ggplot(aes(x = mean_dayl.s_Apr, 
              y = sum_prcp.mm_Oct)) +
   geom_point() +
-  geom_smooth(method="lm") +
-  stat_correlation()
+  geom_smooth(method="lm")+ stat_cor()
+
 ```
 
 Two correlated variables:
@@ -247,15 +247,20 @@ weather %>%
   ggplot(aes(x = mean_dayl.s_Apr, 
              y = mean_dayl.s_May))+
   geom_point() +
-  geom_smooth(method="lm")
+  geom_smooth() +
+  stat_cor()
+#library(ggpubr)
 
 ```
 
 Now let's fit some models with one or two uncorrelated and correlated variables explaining fiberstrength and see what happens.  
 
 ```{r strength ~ mean_dayl.s_Apr}
-lm_dayl.apr 
-
+lm_dayl.apr <- lm(strength_gtex ~ mean_dayl.s_Apr,
+                  data = weather) %>%
+  tidy() %>% # tidy give you estimates of a linear model
+  filter(term != "(Intercept)") %>%
+  mutate(mod = "lm_dayl.apr")
 lm_dayl.apr
 
 ```
@@ -305,7 +310,12 @@ lm_dayl.apr %>%
                              "lm_2var.uncor",
                              "lm_2var.cor"))) %>%
   filter(term != "mean_dayl.s_May") %>%
-  ggplot(aes(x=mod))
+  ggplot(aes(x=mod)) +
+  geom_pointrange(aes (y = estimate, ymin = estimate - std.error,
+                       ymax = estimate + std.error
+                       )) +
+  facet_wrap(~term, scales = "free_y") +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2))
 
 ```
 
@@ -323,6 +333,10 @@ General rule of thumb:
 Let's check the variance inflation factor (VIF) of both uncorrelated and correlated models
 ```{r vif uncorrelated}
 # Uncorrelated
+lm(strength_gtex ~ mean_dayl.s_Apr + 
+                   sum_prcp.mm_Oct,
+   data = weather) %>%
+  vif()
 ```
 
 
@@ -331,8 +345,7 @@ Let's check the variance inflation factor (VIF) of both uncorrelated and correla
 lm(strength_gtex ~ mean_dayl.s_Apr + 
                   mean_dayl.s_May,
    data = weather) %>%
-  vif()
-
+  vif() # if you have more than 3 variables, you will have different vif for each pair of variables
 ```
 
 ## Dealing with multicollinearity  
@@ -350,7 +363,7 @@ Options:
 
 Many multivariate approaches deal with some sort of similarity/dissimilarity measure among predictors.  
 
-In those cases, predictors with vastly different scales (e.g. mean_tmin.c_Jan from -10 to 10 C vs mean_dayl.s_Jul from 48000 to 51000) need to be normalized so measurement scale does not affect variable importance.    
+In those cases, predictors with vastly different scales (e.g. mean_tmin.c_Jan from -10 to 10 C vs mean_dayl.s_Jul from 48000 to 51000) need to be normalized so measurement scale does not affect variable importance.Higher magnitude might drive significance but it is just an artifact.    
 
 Thus, our numerical predictor variables need to be normalized (center and scale) before starting our multivariate analysis.  
 
@@ -358,7 +371,8 @@ Some analysis do the normalization for you (like PCA), and others don't (like k-
 
 Since both PCA and k-means only take numerical variables, let's select them now.  
 ```{r selecting only numerical vars}
-weather_n 
+weather_n <- weather %>%
+  dplyr::select(-year, -site, -strength_gtex) 
 
 weather_n
 ```
@@ -368,12 +382,12 @@ Principal component analysis (PCA) is a dimensionality reduction approach that a
 
 Finds linear relationships among predictors that can be represented in a lower number of uncorrelated dimensions.  
 
-Works well when at least some predictors are correlated.  
+Works well when **at least some predictors are correlated**.  
 
 PCA:  
 
 - Is used for dimensionality reduction  
-- Is an unsupervised analysis (no outcome)  
+- Is an unsupervised analysis (no outcome) - do not have a y varible
 - Only takes predictors  
 - Predictors need to be numerical  
 
@@ -383,25 +397,26 @@ Some PCA properties:
 
 - The overall variance explained by each PC is greatest for PC1 and decreases as PC number increases (e.g., PC72 will explain the least variance).  
 
-- All PCs are **orthogonal** (i.e., independent of each other).  
+- All PCs are **orthogonal** (i.e., independent of each other). vs variables are not s 
 
 - The goal is to select a small number of PCs that explain a minimum threshold of the total variance (e.g., 70%).  
 
 ```{r pca in action}
+install.packages("knitr")
 knitr::include_graphics("https://miro.medium.com/v2/resize:fit:1200/1*V4H3Cu8qGr_90WANKSO9BA.gif")
 ```
 Let's run PCA for our weather data.  
 
 ```{r pca model}
-mod_pca 
-
+mod_pca <- prcomp(weather_n, scale. = T)
+mod_pca
 ```
 
 ## Choosing number of PCs  
 Based on scree plot (total variance):  
 ```{r pca checking number of components}
 # Scree plot
-
+fviz_eig(mod_pca, addlabls = T)
 ```
     
 PCs 1 and 2 explain ~35% and ~26% (61%) of total variance.
@@ -409,7 +424,14 @@ This indicates that original variables were correlated (as we expected).
 
 If wanted to use enough PCs to explain 70% of total variance, how many would we need?  
 ```{r PCs to explain 70pct variance}
-
+mod_pca %>%
+  get_eig() %>%
+  mutate(pc = 1:nrow(.)) %>%
+  ggplot(aes(x = pc,
+             y = cumulative.variance.percent
+             )) +
+  geom_bar(stat = "identity") + 
+  geom_hline(yintercept = 70)
 
 ```
     
@@ -438,7 +460,7 @@ mod_pca$rotation %>%
 Which variables contributed most to PC1, regardless of direction?  
 
 ```{r variables contributing to PC1}
-
+fviz_contrib(mod_pca, choice = "var", axes = 1)
 ```
   
 Let's check the eigenvectors for both PCs 1 and 2 variables:  
@@ -454,10 +476,10 @@ fviz_pca_var(mod_pca,
   
 The longer is the eigenvector for a given variable, the more important it is towards that PC.  
 
-Let's plot PC1 vs PC2 scores, look for any groupings.  
+Let's plot PC1 vs PC2 scores, look for any groupings.It just multiply the weight of the component by each site_year and add them up
 
 ```{r PC1 vs PC2}
-
+fviz_pca_ind(mod_pca, label = F)
 ```
   
 Appears that some groups exist.  
@@ -474,18 +496,21 @@ Let's add the first 4 PCs to our original dataset and run a regression versus gr
 
 ```{r pca scores}
 # Extract first 4 PCs scores
-pca_scores 
+pca_scores <- mod_pca$x %>%
+  as.data.frame() %>%
+  dplyr::select(PC1:PC4)
 
 pca_scores
 ```
 
 ```{r pca regression}
 # Adding PCs 1-4 scores to original data set
-weather_postpca 
+weather_postpca <- weather %>%
+  bind_cols(pca_scores)
 
 # Regression of yield ~ PCs
 
-lm_pca 
+lm_pca <- lm(strength_gtex ~ PC1 + PC2 + PC3 + PC4, data = weather_postpca) 
 
 # Summary  
 summary(lm_pca)
@@ -494,12 +519,13 @@ summary(lm_pca)
 
 ```{r pca regression}
 # Checking VIF
-
+vif(lm_pca)
 ```
-
+this is why we used PCA
 ```{r pca regression plots}
 # Plotting strength vs PC1
-
+ggplot(weather_postpca, 
+       aes(x = PC1, y = strength_gtex))+ geom_point() + geom_smooth(method = "lm")
 ```
 
 
