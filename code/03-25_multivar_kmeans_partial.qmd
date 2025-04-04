@@ -13,9 +13,9 @@ Our learning objectives are to:
 #| message: false
 #| warning: false
 
-install.packages("ggcorrplot")
-install.packages("factoextra")
-install.packages("ggpmisc")
+#install.packages("ggcorrplot")
+#install.packages("factoextra")
+#nstall.packages("ggpmisc")
 
 library(tidyverse)
 library(ggcorrplot)
@@ -90,11 +90,18 @@ Let's try 2.
 
 ```{r kmeans model }
 mod_km  <- kmeans(weather_norm,
-                  centers = 7,
+                  centers = 3,
                   nstart =10
                   )
 
 mod_km
+mod_km1  <- kmeans(weather_norm,
+                  centers = 6,
+                  nstart =10
+                  )
+
+mod_km1
+
 ```
 
 Since the choice of k can be subjective, we will need to find an objective way to select the value of k that most properly represents our dataset.  
@@ -134,11 +141,16 @@ mod_km4
 
 How many observations per cluster?
 ```{r}
+# For k = 4
 weather %>%
   mutate(cluster = mod_km4$cluster) %>% 
   group_by(cluster) %>%
   tally()
-  
+# For k = 3 
+weather %>%
+  mutate(cluster = mod_km$cluster) %>% 
+  group_by(cluster) %>%
+  tally() 
 ```
 
 Now how can we visually inspect the resutls of k-means?  
@@ -159,7 +171,22 @@ weather %>%
     geom_boxplot(show.legend = F)+
   facet_wrap(~name, scales = "free_y", ncol = 6)
 
-ggsave("../output/clustervalidation.png",
+ggsave("../output/clustervalidationk_4.png",
+       width = 10,
+       height = 20)  
+
+# For k = 3
+weather %>%
+  mutate(cluster = mod_km$cluster,
+         cluster = factor(cluster)) %>%
+  pivot_longer(!c(year,site,cluster)) %>%
+  ggplot(aes(x = cluster, 
+             y = value, 
+             color = cluster))+
+    geom_boxplot(show.legend = F)+
+  facet_wrap(~name, scales = "free_y", ncol = 6)
+
+ggsave("../output/clustervalidationk_3.png",
        width = 10,
        height = 20)  
 
@@ -173,7 +200,14 @@ We could actually run ANOVA models for each original variable of the form
 and extract cluster mean and pairwise comparison to understand what variables had significant differences among clusters.  
 
 ```{r kmeans PCA plot}
-
+# For k = 4
+fviz_cluster(mod_km4,
+             data = weather_norm, title = "cluster plot for k = 4"
+             )
+# For k = 3
+fviz_cluster(mod_km,
+             data = weather_norm
+             )
 ```
   
 Notice how, behind the scenes, the fviz_cluster function ran a PCA and is showing us a plot with PCs 1 and 2 on the axis (same result as we obtained on the PCA analysis).   
